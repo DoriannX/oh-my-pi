@@ -378,6 +378,12 @@ export interface OverlayOptions {
 	 */
 	fullscreen?: boolean;
 	/**
+	 * Keep this overlay below ordinary dialogs and menus. Used by persistent
+	 * application surfaces that own the alternate screen without behaving like a
+	 * modal; normal overlays continue to receive focus and input above it.
+	 */
+	base?: boolean;
+	/**
 	 * Enable terminal mouse reporting while fullscreen. Defaults on; disable it
 	 * when native terminal text selection takes precedence over pointer events.
 	 */
@@ -996,9 +1002,10 @@ export class TUI extends Container {
 	showOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
 		component.setIgnoreTight?.(true);
 		const entry = { component, options, preFocus: this.#focusedComponent, hidden: false };
-		this.overlayStack.push(entry);
+		if (options?.base) this.overlayStack.unshift(entry);
+		else this.overlayStack.push(entry);
 		// Only focus if overlay is actually visible
-		if (this.#isOverlayVisible(entry)) {
+		if (this.#isOverlayVisible(entry) && this.#getTopmostVisibleOverlay() === entry) {
 			this.setFocus(component);
 		}
 		this.terminal.hideCursor();
@@ -1013,8 +1020,7 @@ export class TUI extends Container {
 					this.overlayStack.splice(index, 1);
 					// Restore focus if this overlay or one of its owned targets had focus
 					if (isOverlayFocusTarget(component, this.#focusedComponent)) {
-						const topVisible = this.#getTopmostVisibleOverlay();
-						this.setFocus(topVisible?.component ?? entry.preFocus);
+						this.#restoreOverlayFocus(entry);
 					}
 					if (this.overlayStack.length === 0) {
 						this.terminal.hideCursor();
@@ -1030,8 +1036,7 @@ export class TUI extends Container {
 				if (hidden) {
 					// If this overlay or one of its owned targets had focus, move focus to next visible or preFocus
 					if (isOverlayFocusTarget(component, this.#focusedComponent)) {
-						const topVisible = this.#getTopmostVisibleOverlay();
-						this.setFocus(topVisible?.component ?? entry.preFocus);
+						this.#restoreOverlayFocus(entry);
 					}
 				} else {
 					// Restore focus to this overlay when showing (if it's actually visible)
@@ -1050,8 +1055,7 @@ export class TUI extends Container {
 		const overlay = this.overlayStack.pop();
 		if (!overlay) return;
 		// Find topmost visible overlay, or fall back to preFocus
-		const topVisible = this.#getTopmostVisibleOverlay();
-		this.setFocus(topVisible?.component ?? overlay.preFocus);
+		this.#restoreOverlayFocus(overlay);
 		if (this.overlayStack.length === 0) {
 			this.terminal.hideCursor();
 			this.#recordHardwareCursorHidden();
@@ -1061,7 +1065,7 @@ export class TUI extends Container {
 
 	/** Check if there are any visible overlays */
 	hasOverlay(): boolean {
-		return this.overlayStack.some(o => this.#isOverlayVisible(o));
+		return this.overlayStack.some(o => this.#isOverlayVisible(o) && o.options?.base !== true);
 	}
 
 	/** Check if an overlay entry is currently visible */
@@ -1081,6 +1085,16 @@ export class TUI extends Container {
 			}
 		}
 		return undefined;
+	}
+
+	/** Restore focus after a modal leaves without stealing an owned base surface's editor. */
+	#restoreOverlayFocus(entry: (typeof this.overlayStack)[number]): void {
+		const topVisible = this.#getTopmostVisibleOverlay();
+		if (topVisible?.options?.base && isOverlayFocusTarget(topVisible.component, entry.preFocus)) {
+			this.setFocus(entry.preFocus);
+			return;
+		}
+		this.setFocus(topVisible?.component ?? entry.preFocus);
 	}
 
 	override invalidate(): void {
@@ -1945,13 +1959,7 @@ export class TUI extends Container {
 		const focusedOverlay = this.overlayStack.find(o => o.component === this.#focusedComponent);
 		if (focusedOverlay && !this.#isOverlayVisible(focusedOverlay)) {
 			// Focused overlay is no longer visible, redirect to topmost visible overlay
-			const topVisible = this.#getTopmostVisibleOverlay();
-			if (topVisible) {
-				this.setFocus(topVisible.component);
-			} else {
-				// No visible overlays, restore to preFocus
-				this.setFocus(focusedOverlay.preFocus);
-			}
+			this.#restoreOverlayFocus(focusedOverlay);
 		}
 
 		// Pass input to focused component (including Ctrl+C).
@@ -2589,9 +2597,11 @@ export class TUI extends Container {
 		// Fullscreen alt-screen short-circuit. While the topmost visible overlay
 		// requests it, borrow the terminal's alternate buffer and paint only the
 		// modal there; the normal screen and all accounting stay untouched.
-		const topOverlay = this.#getTopmostVisibleOverlay();
-		const wantAlt = topOverlay?.options?.fullscreen === true;
-		const wantMouseTracking = wantAlt && topOverlay.options?.mouseTracking !== false;
+		const fullscreenOverlay = [...this.overlayStack]
+			.reverse()
+			.find(entry => this.#isOverlayVisible(entry) && entry.options?.fullscreen === true);
+		const wantAlt = fullscreenOverlay !== undefined;
+		const wantMouseTracking = wantAlt && fullscreenOverlay.options?.mouseTracking !== false;
 		if (wantAlt && !this.#altActive) {
 			// Enhanced keyboard modes can be buffer-local: re-push the active
 			// modified-key reporting sequence on the freshly entered alternate

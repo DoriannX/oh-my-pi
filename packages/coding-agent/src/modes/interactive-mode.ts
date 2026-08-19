@@ -170,6 +170,7 @@ import { DynamicBorder } from "./components/dynamic-border";
 import { EditorTopGap } from "./components/editor-top-gap";
 import { ErrorBannerComponent } from "./components/error-banner";
 import type { EvalExecutionComponent } from "./components/eval-execution";
+import { FullscreenChatView } from "./components/fullscreen-chat-view";
 import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "./components/hook-selector";
@@ -750,6 +751,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	#planReviewAnnotationState = new Map<string, PlanReviewAnnotationState>();
 	/** Annotation state held until the associated queued refinement actually starts. */
 	#planReviewAnnotationStateBySubmission = new WeakMap<SubmittedUserInput, string>();
+	#fullscreenChatView: FullscreenChatView | undefined;
+	#fullscreenChatOverlay: OverlayHandle | undefined;
+	#fullscreenChatInputUnsubscribe: (() => void) | undefined;
 	readonly lspServers: LspStartupServerInfo[] | undefined = undefined;
 	mcpManager?: MCPManager;
 	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
@@ -1250,6 +1254,12 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#eventBusUnsubscribers.push(startMacOSAppearanceReprobeFallback(this.ui.terminal));
 		}
 
+		// Start listeners run before TUI's first paint. Enter the alternate screen
+		// there so resuming a long session never replays its transcript into the
+		// normal Windows console buffer before fullscreen takes over.
+		this.ui.addStartListener(() => {
+			if (this.settings.get("tui.fullscreen")) this.setFullscreenTui(true);
+		});
 		// A prepaint Composer may already own raw mode and the render loop.
 		if (!this.#ownsStartedUi) {
 			this.composer.start({
@@ -1257,6 +1267,10 @@ export class InteractiveMode implements InteractiveModeContext {
 				playWelcomeIntro: !options.suppressWelcomeIntro,
 			});
 			this.#ownsStartedUi = true;
+		} else if (this.settings.get("tui.fullscreen")) {
+			// Prepaint already started the TUI, so the start listener above will
+			// never fire for this launch: enter fullscreen now instead.
+			this.setFullscreenTui(true);
 		}
 		pushTerminalTitle();
 		setTerminalTitleStateEnabled(this.settings.get("tui.titleState"));
@@ -4777,6 +4791,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#extensionUiController.clearExtensionTerminalInputListeners();
 		this.#extensionUiController.clearHookWidgets();
 		this.#extensionUiController.disposeComposerShapes();
+		this.#fullscreenChatInputUnsubscribe?.();
+		this.#fullscreenChatInputUnsubscribe = undefined;
+		this.#fullscreenChatOverlay = undefined;
+		this.#fullscreenChatView = undefined;
 		for (const unsubscribe of this.#eventBusUnsubscribers) {
 			unsubscribe();
 		}
@@ -4940,7 +4958,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const nextEditor = factory
 			? factory(this.ui, getEditorTheme(), this.keybindings)
 			: new CustomEditor(getEditorTheme());
-		nextEditor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
+		nextEditor.setUseTerminalCursor(this.#fullscreenChatOverlay ? false : this.ui.getShowHardwareCursor());
 		nextEditor.setImeSafeCursorLayout(this.settings.get("tui.imeSafeCursor"));
 		nextEditor.setAutocompleteMaxVisible(this.settings.get("autocompleteMaxVisible"));
 		nextEditor.setSpellingFeatures({
@@ -4980,6 +4998,51 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		this.updateEditorBorderColor();
 		this.ui.requestRender();
+	}
+
+	/** Enable or disable the persistent alternate-screen chat layout. */
+	setFullscreenTui(enabled: boolean): void {
+		if (enabled) {
+			if (this.#fullscreenChatOverlay) return;
+			const dockStart = this.ui.children.indexOf(this.pendingMessagesContainer);
+			if (dockStart === -1) return;
+			this.#fullscreenChatView = new FullscreenChatView(
+				this.ui.children.slice(0, dockStart),
+				this.ui.children.slice(dockStart),
+				this.editorContainer,
+				() => this.ui.terminal.rows,
+			);
+			this.#fullscreenChatInputUnsubscribe = this.ui.addInputListener(data => {
+				const focused = this.ui.getFocused();
+				if (!focused || !this.editorContainer.children.includes(focused)) return undefined;
+				if (!this.#fullscreenChatView?.handleViewportInput(data)) return undefined;
+				this.ui.requestRender();
+				return { consume: true };
+			});
+			this.editor.setUseTerminalCursor(false);
+			this.#fullscreenChatOverlay = this.ui.showOverlay(this.#fullscreenChatView, {
+				width: "100%",
+				maxHeight: "100%",
+				anchor: "top-left",
+				margin: 0,
+				fullscreen: true,
+				mouseTracking: true,
+				base: true,
+			});
+			this.ui.setFocus(this.editorContainer.children[0] ?? this.editor);
+			this.ui.requestRender(true);
+			return;
+		}
+
+		if (!this.#fullscreenChatOverlay) return;
+		this.#fullscreenChatInputUnsubscribe?.();
+		this.#fullscreenChatInputUnsubscribe = undefined;
+		this.#fullscreenChatOverlay.hide();
+		this.#fullscreenChatOverlay = undefined;
+		this.#fullscreenChatView = undefined;
+		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
+		this.ui.setFocus(this.editorContainer.children[0] ?? this.editor);
+		this.ui.requestRender(true);
 	}
 
 	// UI helpers
