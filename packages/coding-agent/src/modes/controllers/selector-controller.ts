@@ -625,6 +625,10 @@ export class SelectorController {
 				this.ctx.ui.setResizeScrollback(value as ResizeScrollbackMode);
 				break;
 
+			case "tui.fullscreen":
+				this.ctx.setFullscreenTui(value as boolean);
+				break;
+
 			case "tui.renderMermaid":
 				setMarkdownMermaidRendering(value as boolean);
 				this.ctx.session.refreshBaseSystemPrompt().catch(err => {
