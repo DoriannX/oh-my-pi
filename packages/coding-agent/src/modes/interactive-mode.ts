@@ -750,6 +750,12 @@ export class InteractiveMode implements InteractiveModeContext {
 	#fullscreenChatView: FullscreenChatView | undefined;
 	#fullscreenChatOverlay: OverlayHandle | undefined;
 	#fullscreenChatInputUnsubscribe: (() => void) | undefined;
+	/**
+	 * Root children handed to the Composer. The TUI root is Composer-owned since
+	 * the explicit-history frame provider landed, so the fullscreen dock split is
+	 * computed here rather than from `ui.children`.
+	 */
+	#rootRuntimeChildren: readonly Component[] = [];
 	readonly lspServers: LspStartupServerInfo[] | undefined = undefined;
 	mcpManager?: MCPManager;
 	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
@@ -1197,7 +1203,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 		this.composer.setStatusComponent(this.statusLine);
 
-		this.composer.setRuntimeChildren([
+		this.#rootRuntimeChildren = [
 			this.chatContainer,
 			this.pendingMessagesContainer,
 			this.todoContainer,
@@ -1217,7 +1223,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.hookWidgetContainerAbove,
 			this.editorContainer,
 			this.hookWidgetContainerBelow,
-		]);
+		];
+		this.composer.setRuntimeChildren([...this.#rootRuntimeChildren]);
 		this.ui.setFocus(this.editor);
 		this.syncComposerShape();
 
@@ -4915,11 +4922,12 @@ export class InteractiveMode implements InteractiveModeContext {
 	setFullscreenTui(enabled: boolean): void {
 		if (enabled) {
 			if (this.#fullscreenChatOverlay) return;
-			const dockStart = this.ui.children.indexOf(this.pendingMessagesContainer);
+			const rootChildren = this.#rootRuntimeChildren;
+			const dockStart = rootChildren.indexOf(this.pendingMessagesContainer);
 			if (dockStart === -1) return;
 			this.#fullscreenChatView = new FullscreenChatView(
-				this.ui.children.slice(0, dockStart),
-				this.ui.children.slice(dockStart),
+				rootChildren.slice(0, dockStart),
+				rootChildren.slice(dockStart),
 				this.editorContainer,
 				() => this.ui.terminal.rows,
 			);
