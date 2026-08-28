@@ -29,6 +29,8 @@ export class FullscreenChatView implements Component, OverlayFocusOwner {
 		private readonly dockComponents: readonly Component[],
 		private readonly editorContainer: Container,
 		private readonly terminalRows: () => number,
+		/** Read per notch so `/settings` changes apply without recreating the view. */
+		private readonly wheelScrollLines: () => number = () => 3,
 	) {}
 
 	/** Lets the normal editor slot keep keyboard focus while this overlay owns the screen. */
@@ -113,7 +115,8 @@ export class FullscreenChatView implements Component, OverlayFocusOwner {
 
 	#handleMouse(event: SgrMouseEvent): boolean {
 		if (event.wheel !== null) {
-			this.#scrollView.scroll(event.wheel);
+			const lines = this.wheelScrollLines();
+			this.#scrollView.scroll(event.wheel * (Number.isFinite(lines) ? Math.max(1, Math.trunc(lines)) : 1));
 			this.#followTail = this.#scrollView.getScrollOffset() === this.#scrollView.getMaxScrollOffset();
 			return true;
 		}

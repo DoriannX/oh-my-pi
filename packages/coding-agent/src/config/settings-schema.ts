@@ -1277,6 +1277,34 @@ export const SETTINGS_SCHEMA = {
 				"Use an alternate-screen chat view with an independently scrollable transcript, scrollbar, and fixed editor/status dock",
 		},
 	},
+	"tui.scrollLines": {
+		type: "number",
+		default: 3,
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Wheel Scroll Lines",
+			description: "Transcript lines moved per mouse-wheel notch in the fullscreen TUI",
+			options: [
+				{ value: "1", label: "1 line" },
+				{ value: "3", label: "3 lines" },
+				{ value: "5", label: "5 lines" },
+				{ value: "8", label: "8 lines" },
+				{ value: "12", label: "12 lines" },
+			],
+		},
+	},
+	"tui.fullscreenMouse": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Fullscreen Mouse Capture",
+			description:
+				"Let the fullscreen TUI capture the mouse for wheel scrolling and scrollbar dragging. Turn off to restore the terminal's own click-drag text selection; PageUp/PageDown/Home/End still scroll",
+		},
+	},
 
 	"display.shimmer": {
 		type: "enum",

@@ -77,4 +77,35 @@ describe("FullscreenChatView", () => {
 		expect(view.handleViewportInput("\x1b[<0;1;1M")).toBe(true);
 		expect(view.handleViewportInput("\x1b[<0;1;1m")).toBe(true);
 	});
+
+	it("moves the configured number of transcript lines per wheel notch", () => {
+		const transcript = new LinesComponent(Array.from({ length: 30 }, (_, index) => `line-${index + 1}`));
+		const editor = new LinesComponent(["editor"]);
+		const editorContainer = new Container();
+		editorContainer.addChild(editor);
+		let linesPerNotch = 1;
+		const view = new FullscreenChatView(
+			[transcript],
+			[editorContainer],
+			editorContainer,
+			() => 6,
+			() => linesPerNotch,
+		);
+
+		// Viewport shows 5 transcript rows above the 1-row dock, tail-anchored on
+		// line-30, so the top row is line-26 before any scrolling.
+		expect(view.render(12)[0]).toContain("line-26");
+
+		// Wheel-up notch (SGR button 64) at one line per notch.
+		expect(view.handleViewportInput("\x1b[<64;1;1M")).toBe(true);
+		expect(view.render(12)[0]).toContain("line-25");
+
+		linesPerNotch = 5;
+		expect(view.handleViewportInput("\x1b[<64;1;1M")).toBe(true);
+		expect(view.render(12)[0]).toContain("line-20");
+
+		// Wheel-down (button 65) uses the same multiplier in the other direction.
+		expect(view.handleViewportInput("\x1b[<65;1;1M")).toBe(true);
+		expect(view.render(12)[0]).toContain("line-25");
+	});
 });

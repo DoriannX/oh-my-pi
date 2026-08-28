@@ -670,6 +670,15 @@ export class SelectorController {
 				this.ctx.setFullscreenTui(value as boolean);
 				break;
 
+			case "tui.fullscreenMouse":
+				// Mouse reporting is decided when the base overlay is mounted, so
+				// re-mount it to pick the new value up without a restart.
+				if (this.ctx.settings.get("tui.fullscreen")) {
+					this.ctx.setFullscreenTui(false);
+					this.ctx.setFullscreenTui(true);
+				}
+				break;
+
 			case "tui.renderMermaid":
 				setMarkdownMermaidRendering(value as boolean);
 				this.ctx.session.refreshBaseSystemPrompt().catch(err => {

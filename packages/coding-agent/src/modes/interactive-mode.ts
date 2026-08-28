@@ -5019,6 +5019,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				rootChildren.slice(dockStart),
 				this.editorContainer,
 				() => this.ui.terminal.rows,
+				() => this.settings.get("tui.scrollLines"),
 			);
 			this.#fullscreenChatInputUnsubscribe = this.ui.addInputListener(data => {
 				const focused = this.ui.getFocused();
@@ -5034,7 +5035,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				anchor: "top-left",
 				margin: 0,
 				fullscreen: true,
-				mouseTracking: true,
+				mouseTracking: this.settings.get("tui.fullscreenMouse"),
 				base: true,
 			});
 			this.ui.setFocus(this.editorContainer.children[0] ?? this.editor);
