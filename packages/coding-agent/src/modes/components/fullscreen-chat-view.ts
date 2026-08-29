@@ -23,6 +23,17 @@ export class FullscreenChatView implements Component, OverlayFocusOwner {
 	#viewportHeight = 1;
 	#width = 1;
 	#draggingScrollbar = false;
+	/**
+	 * Whether the transcript overflowed last frame, so the scrollbar column was
+	 * reserved. Reused as this frame's first guess: rendering the transcript once
+	 * to measure it and again at the narrower width doubled the per-frame cost of
+	 * every scroll, and the guess only misses on the frame the state flips.
+	 */
+	#scrollbarReserved = false;
+	/** Per-width memo of the flattened transcript, keyed on component array identity. */
+	#transcriptCache: { width: number; parts: readonly (readonly string[])[]; flat: string[] } | undefined;
+	/** Line array last handed to the scroll view, to skip its defensive copy. */
+	#scrollViewLines: readonly string[] | undefined;
 
 	constructor(
 		private readonly transcriptComponents: readonly Component[],
@@ -58,23 +69,54 @@ export class FullscreenChatView implements Component, OverlayFocusOwner {
 		const terminalRows = Math.max(1, this.terminalRows());
 		const dockLines = this.#renderDock(this.#width, terminalRows);
 		this.#viewportHeight = Math.max(1, terminalRows - dockLines.length);
-		const fullWidthTranscript = this.#renderComponents(this.transcriptComponents, this.#width);
-		// The scrollbar consumes the last terminal column. Re-render the
-		// transcript at its remaining width so each component wraps its own
-		// content instead of ScrollView cutting a rendered line short.
-		const transcriptWidth =
-			fullWidthTranscript.length > this.#viewportHeight ? Math.max(1, this.#width - 1) : this.#width;
-		const transcriptLines =
-			transcriptWidth === this.#width
-				? fullWidthTranscript
-				: this.#renderComponents(this.transcriptComponents, transcriptWidth);
+
+		// The scrollbar consumes the last terminal column, and each component must
+		// wrap its own content at that reduced width rather than have ScrollView
+		// cut a rendered line short. Start from the previous frame's answer so a
+		// steady-state scroll renders the transcript once; correct it on the one
+		// frame where overflow appears or disappears.
+		let transcriptLines = this.#transcriptLines(this.#scrollbarReserved ? Math.max(1, this.#width - 1) : this.#width);
+		if (transcriptLines.length > this.#viewportHeight !== this.#scrollbarReserved) {
+			this.#scrollbarReserved = transcriptLines.length > this.#viewportHeight;
+			transcriptLines = this.#transcriptLines(this.#scrollbarReserved ? Math.max(1, this.#width - 1) : this.#width);
+		}
 
 		this.#scrollView.setHeight(this.#viewportHeight);
-		this.#scrollView.setLines(transcriptLines);
+		// setLines copies defensively; the memo hands back the same array while the
+		// transcript is unchanged, so a scroll-only frame skips that copy entirely.
+		if (transcriptLines !== this.#scrollViewLines) {
+			this.#scrollView.setLines(transcriptLines);
+			this.#scrollViewLines = transcriptLines;
+		}
 		if (this.#followTail) this.#scrollView.scrollToBottom();
 
 		const transcriptViewport = this.#scrollView.render(this.#width);
 		return [...transcriptViewport, ...dockLines];
+	}
+
+	/**
+	 * Flattened transcript for one width. Components own their render caches and
+	 * return the same array reference while unchanged (a component that mutates
+	 * its array in place must implement RenderStablePrefix), so array identity is
+	 * the change signal: the flat copy is rebuilt only when a block really moved.
+	 */
+	#transcriptLines(width: number): string[] {
+		const parts = this.transcriptComponents.map(component => component.render(width));
+		const cached = this.#transcriptCache;
+		if (cached !== undefined && cached.width === width && cached.parts.length === parts.length) {
+			let unchanged = true;
+			for (let index = 0; index < parts.length; index++) {
+				if (parts[index] !== cached.parts[index]) {
+					unchanged = false;
+					break;
+				}
+			}
+			if (unchanged) return cached.flat;
+		}
+		const flat: string[] = [];
+		for (const part of parts) flat.push(...part);
+		this.#transcriptCache = { width, parts, flat };
+		return flat;
 	}
 
 	#renderComponents(components: readonly Component[], width: number): string[] {

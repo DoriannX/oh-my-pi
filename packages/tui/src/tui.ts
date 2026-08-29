@@ -745,7 +745,13 @@ export class TUI extends Container {
 	 * fire the next frame immediately (see #4145).
 	 */
 	#lastFrameCostMs = 0;
-	static readonly #MIN_RENDER_INTERVAL_MS = 1000 / 30;
+	/**
+	 * Frame ceiling. 60 rather than 30: measured frames cost 3–6 ms even with a
+	 * long fullscreen transcript, so a 33 ms floor was the only thing making a
+	 * wheel spin land in ~5-line jumps. The adaptive floor below still backs off
+	 * on genuinely expensive frames.
+	 */
+	static readonly #MIN_RENDER_INTERVAL_MS = 1000 / 60;
 	static readonly #INPUT_RENDER_GRACE_MS = TUI.#MIN_RENDER_INTERVAL_MS;
 	/**
 	 * Cap on the adaptive floor derived from `#lastFrameCostMs`. Bounds the UI
