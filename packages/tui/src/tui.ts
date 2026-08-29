@@ -823,6 +823,8 @@ export class TUI extends Container {
 	#altActive = false;
 	#altMouseTrackingActive = false;
 	#altPreviousLines: string[] = [];
+	/** Cursor target of the last alt frame; part of the repaint-skip decision. */
+	#altPreviousCursor: HardwareCursorState | null = null;
 	#altEnterWidth = 0;
 	#altEnterHeight = 0;
 	#resizeAltActive = false;
@@ -1460,7 +1462,9 @@ export class TUI extends Container {
 		} while (this.#imageBudget.endPass());
 		const viewport = rendered.length > height ? rendered.slice(rendered.length - height) : Array.from(rendered);
 		this.#extractCursorMarkers(viewport);
-		this.#emitAltFrame(this.#prepareLinesArray(viewport, width), width, height);
+		// The resize borrow is transient scaffolding, not an interactive surface:
+		// no caret is parked there.
+		this.#emitAltFrame(this.#prepareLinesArray(viewport, width), width, height, null);
 	}
 
 	/**
@@ -2966,25 +2970,33 @@ export class TUI extends Container {
 
 	/**
 	 * Compose and paint a single fullscreen overlay frame on the alt buffer.
-	 * Cursor markers are stripped (the modal draws its own in-band caret and
-	 * keeps the hardware cursor hidden), and only the modal is composited over a
-	 * blank base — the transcript is never touched while the alt buffer is up.
+	 * Only the overlays are composited over a blank base — the transcript is
+	 * never touched while the alt buffer is up.
+	 *
+	 * A transient modal draws its own in-band caret and emits no cursor marker,
+	 * so the hardware cursor stays hidden for it. A persistent surface that docks
+	 * a real editor (fullscreen chat) does emit one, and gets the hardware cursor
+	 * parked on it exactly like the normal-screen path.
 	 */
 	#renderAltFrame(width: number, height: number): void {
 		// oxlint-disable-next-line unicorn/no-new-array -- alt-frame length preallocation
 		const base: string[] = new Array(Math.max(0, height)).fill("");
 		let lines = this.#compositeOverlaysIntoWindow(base, width, height);
-		this.#extractCursorMarkers(lines);
+		const markers = this.#extractCursorMarkers(lines);
 		lines = this.#prepareLinesArray(lines, width);
-		this.#emitAltFrame(lines, width, height);
+		const marker = markers[0];
+		const target =
+			marker !== undefined ? this.#targetHardwareCursorState({ row: marker.row, col: marker.col }, height) : null;
+		this.#emitAltFrame(lines, width, height, target);
 	}
 
 	/**
 	 * Full per-row viewport rewrite on the alt buffer. Emits only sync-output
-	 * brackets, a cursor home, and per-row rewrites — never ED3 or any
-	 * native-scrollback byte. The hardware cursor stays hidden here.
+	 * brackets, a cursor home, per-row rewrites, and the cursor placement —
+	 * never ED3 or any native-scrollback byte. `target` is null when nothing on
+	 * screen owns a real caret, which keeps the hardware cursor hidden.
 	 */
-	#emitAltFrame(lines: string[], width: number, height: number): void {
+	#emitAltFrame(lines: string[], width: number, height: number, target: HardwareCursorState | null): void {
 		// oxlint-disable-next-line unicorn/no-new-array -- alt-frame length preallocation
 		const fitted: string[] = new Array(height);
 		for (let r = 0; r < height; r++) fitted[r] = lines[r] ?? "";
@@ -3006,7 +3018,17 @@ export class TUI extends Container {
 		// corrupted modal even when our cached frame is byte-identical.
 		const force = this.#forceViewportRepaintOnNextRender;
 		this.#forceViewportRepaintOnNextRender = false;
-		if (!force && this.#altPreviousLines.length === height) {
+		// A caret move inside unchanged text leaves the stripped rows byte-identical,
+		// so the cursor target takes part in the skip decision too.
+		const previousTarget = this.#altPreviousCursor;
+		const sameCursor =
+			(target === null && previousTarget === null) ||
+			(target !== null &&
+				previousTarget !== null &&
+				target.row === previousTarget.row &&
+				target.col === previousTarget.col &&
+				target.visible === previousTarget.visible);
+		if (!force && sameCursor && this.#altPreviousLines.length === height) {
 			let same = true;
 			for (let r = 0; r < height; r++) {
 				if (fitted[r] !== this.#altPreviousLines[r]) {
@@ -3021,10 +3043,23 @@ export class TUI extends Container {
 			if (r > 0) buffer += "\r\n";
 			buffer += this.#lineRewriteSequence(fitted[r], width, r, -1, -1, this.#osc66SpacerGlyphWidth(fitted, r));
 		}
+		if (target) {
+			buffer += `\x1b[${target.row + 1};${target.col + 1}H${target.visible ? "\x1b[?25h" : "\x1b[?25l"}`;
+		} else {
+			buffer += "\x1b[?25l";
+		}
 		buffer += this.#paintEndSequence;
 		this.terminal.write(buffer);
 		this.#altPreviousLines = fitted;
-		this.#debugPaint = { lines: fitted, windowTop: 0, altScreen: true };
+		this.#altPreviousCursor = target;
+		if (target) this.#recordHardwareCursorState(target);
+		else this.#recordHardwareCursorHidden();
+		this.#debugPaint = {
+			lines: fitted,
+			windowTop: 0,
+			altScreen: true,
+			...(target === null ? {} : { cursor: { x: target.col, y: target.row, visible: target.visible } }),
+		};
 		this.#fullRedrawCount += 1;
 	}
 }

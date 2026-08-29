@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { type Component, Container, type Focusable, type OverlayFocusOwner, TUI } from "@oh-my-pi/pi-tui";
+import {
+	type Component,
+	Container,
+	CURSOR_MARKER,
+	type Focusable,
+	type OverlayFocusOwner,
+	TUI,
+} from "@oh-my-pi/pi-tui";
 import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui/terminal";
 
 class MinimalTerminal implements Terminal {
@@ -280,6 +287,61 @@ describe("TUI overlay focus", () => {
 			expect(tui.getFocused()).toBe(editor);
 			expect(editor.inputs).toEqual(["\x1b[B"]);
 			expect(approvalPrompt.inputs).toEqual([]);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("parks the hardware cursor on a fullscreen surface's cursor marker", () => {
+		const terminal = new MinimalTerminal();
+		const tui = new TUI(terminal, true);
+		// Fills the 24-row screen: 22 transcript rows plus a two-row dock, with
+		// the caret after "> dr" on the last one.
+		const surface: Component = {
+			render: () => [
+				...Array.from({ length: 22 }, (_, index) => `history-${index + 1}`),
+				"status",
+				`> dr${CURSOR_MARKER}aft`,
+			],
+		};
+
+		try {
+			tui.start();
+			// Same geometry the fullscreen chat dock mounts with.
+			tui.showOverlay(surface, {
+				width: "100%",
+				maxHeight: "100%",
+				anchor: "top-left",
+				margin: 0,
+				fullscreen: true,
+				base: true,
+			});
+			terminal.output = "";
+			tui.renderNow();
+
+			// Row 24, column 5 (1-based CUP), cursor made visible.
+			expect(terminal.output).toContain("\x1b[24;5H\x1b[?25h");
+			// The internal sentinel must never reach the terminal.
+			expect(terminal.output).not.toContain(CURSOR_MARKER);
+			expect(terminal.output).toContain("> draft");
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("keeps the hardware cursor hidden for a fullscreen surface without a marker", () => {
+		const terminal = new MinimalTerminal();
+		const tui = new TUI(terminal);
+		const surface: Component = { render: () => ["modal without a caret"] };
+
+		try {
+			tui.start();
+			tui.showOverlay(surface, { fullscreen: true });
+			terminal.output = "";
+			tui.renderNow();
+
+			expect(terminal.output).toContain("\x1b[?25l");
+			expect(terminal.output).not.toContain("\x1b[?25h");
 		} finally {
 			tui.stop();
 		}

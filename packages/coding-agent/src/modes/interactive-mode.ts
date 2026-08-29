@@ -4965,7 +4965,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		const nextEditor = factory
 			? factory(this.ui, getEditorTheme(), this.keybindings)
 			: new CustomEditor(getEditorTheme());
-		nextEditor.setUseTerminalCursor(this.#fullscreenChatOverlay ? false : this.ui.getShowHardwareCursor());
+		// The alt-screen painter parks the hardware cursor on the emitted marker,
+		// so the docked editor keeps a real caret in fullscreen too.
+		nextEditor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		nextEditor.setImeSafeCursorLayout(this.settings.get("tui.imeSafeCursor"));
 		nextEditor.setAutocompleteMaxVisible(this.settings.get("autocompleteMaxVisible"));
 		nextEditor.setSpellingFeatures({
@@ -5028,7 +5030,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.ui.requestRender();
 				return { consume: true };
 			});
-			this.editor.setUseTerminalCursor(false);
+			this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 			this.#fullscreenChatOverlay = this.ui.showOverlay(this.#fullscreenChatView, {
 				width: "100%",
 				maxHeight: "100%",
