@@ -829,6 +829,8 @@ export class TUI extends Container {
 	#altActive = false;
 	#altMouseTrackingActive = false;
 	#altPreviousLines: string[] = [];
+	/** Width the last alt frame was laid out at; guards the row diff. */
+	#altPreviousWidth = 0;
 	/** Cursor target of the last alt frame; part of the repaint-skip decision. */
 	#altPreviousCursor: HardwareCursorState | null = null;
 	#altEnterWidth = 0;
@@ -3024,8 +3026,12 @@ export class TUI extends Container {
 		// corrupted modal even when our cached frame is byte-identical.
 		const force = this.#forceViewportRepaintOnNextRender;
 		this.#forceViewportRepaintOnNextRender = false;
-		// A caret move inside unchanged text leaves the stripped rows byte-identical,
-		// so the cursor target takes part in the skip decision too.
+		// Text identity and caret identity are two separate decisions. A caret move
+		// inside unchanged text leaves every stripped row byte-identical, so
+		// rewriting the rows would push a whole viewport (~11 KB at a maximised
+		// window) to say what a 10-byte CUP already says. At the 60 fps ceiling a
+		// caret that moves every frame made that ~650 KB/s per painting surface,
+		// which the terminal then has to parse and re-render.
 		const previousTarget = this.#altPreviousCursor;
 		const sameCursor =
 			(target === null && previousTarget === null) ||
@@ -3034,20 +3040,43 @@ export class TUI extends Container {
 				target.row === previousTarget.row &&
 				target.col === previousTarget.col &&
 				target.visible === previousTarget.visible);
-		if (!force && sameCursor && this.#altPreviousLines.length === height) {
-			let same = true;
+		// Comparable: the previous alt frame describes the same grid, so its rows
+		// can be diffed against. Geometry changes also raise a forced repaint, but
+		// the width guard keeps the comparison honest on its own.
+		const comparable = this.#altPreviousLines.length === height && this.#altPreviousWidth === width;
+		let sameText = comparable;
+		if (sameText) {
 			for (let r = 0; r < height; r++) {
 				if (fitted[r] !== this.#altPreviousLines[r]) {
-					same = false;
+					sameText = false;
 					break;
 				}
 			}
-			if (same) return;
 		}
-		let buffer = `${this.#paintBeginSequence}\x1b[H`;
-		for (let r = 0; r < height; r++) {
-			if (r > 0) buffer += "\r\n";
-			buffer += this.#lineRewriteSequence(fitted[r], width, r, -1, -1, this.#osc66SpacerGlyphWidth(fitted, r));
+		if (!force && sameText && sameCursor) return;
+		// Three shapes of frame, cheapest first:
+		//   - caret only: rows untouched, just the placement emitted below;
+		//   - diffed: only the rows that changed, each homed with a CUP, exactly
+		//     like the normal-screen diffable path above;
+		//   - full: every row, when there is nothing comparable to diff against
+		//     (first paint, geometry change) or a forced redraw has to repair a
+		//     corrupted surface.
+		// A streaming transcript changes a handful of rows out of ~50, so diffing
+		// is what keeps a 60 fps surface from pushing a whole viewport per frame.
+		const writeRows = force || !sameText;
+		const diffRows = writeRows && !force && comparable;
+		let buffer = this.#paintBeginSequence;
+		if (diffRows) {
+			for (let r = 0; r < height; r++) {
+				if (fitted[r] === this.#altPreviousLines[r]) continue;
+				buffer += `\x1b[${r + 1};1H${this.#lineRewriteSequence(fitted[r], width, r, -1, -1, this.#osc66SpacerGlyphWidth(fitted, r))}`;
+			}
+		} else if (writeRows) {
+			buffer += "\x1b[H";
+			for (let r = 0; r < height; r++) {
+				if (r > 0) buffer += "\r\n";
+				buffer += this.#lineRewriteSequence(fitted[r], width, r, -1, -1, this.#osc66SpacerGlyphWidth(fitted, r));
+			}
 		}
 		if (target) {
 			buffer += `\x1b[${target.row + 1};${target.col + 1}H${target.visible ? "\x1b[?25h" : "\x1b[?25l"}`;
@@ -3057,6 +3086,7 @@ export class TUI extends Container {
 		buffer += this.#paintEndSequence;
 		this.terminal.write(buffer);
 		this.#altPreviousLines = fitted;
+		this.#altPreviousWidth = width;
 		this.#altPreviousCursor = target;
 		if (target) this.#recordHardwareCursorState(target);
 		else this.#recordHardwareCursorHidden();
@@ -3066,6 +3096,6 @@ export class TUI extends Container {
 			altScreen: true,
 			...(target === null ? {} : { cursor: { x: target.col, y: target.row, visible: target.visible } }),
 		};
-		this.#fullRedrawCount += 1;
+		if (writeRows && !diffRows) this.#fullRedrawCount += 1;
 	}
 }

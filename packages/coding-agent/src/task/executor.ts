@@ -1332,7 +1332,16 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	const refreshRecentOutput = () => {
 		if (!recentOutputDirty) return;
 		recentOutputDirty = false;
-		const filtered = recentOutputTail.split("\n").filter(line => line.trim());
+		// The append path lets the tail overshoot its budget rather than
+		// reallocate on every token, so settle it to the budget here — once per
+		// coalesced emit instead of once per delta. Trimming a longer window to
+		// the same budget yields the same last eight lines, so the emitted
+		// preview is byte-identical to trimming eagerly.
+		const settled =
+			recentOutputTail.length > RECENT_OUTPUT_TAIL_BYTES
+				? recentOutputTail.slice(-RECENT_OUTPUT_TAIL_BYTES)
+				: recentOutputTail;
+		const filtered = settled.split("\n").filter(line => line.trim());
 		progress.recentOutput = filtered.slice(-8).reverse();
 	};
 
@@ -1422,12 +1431,15 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 	const appendRecentOutputTail = (text: string) => {
 		if (!text) return;
 		recentOutputTail += text;
-		if (recentOutputTail.length > RECENT_OUTPUT_TAIL_BYTES) {
+		// This runs on every text_delta token (hundreds/thousands per second
+		// while streaming) and `slice(-8192)` is O(8192), so trimming per token
+		// allocated a fresh 8 KB string per token — megabytes per second of
+		// garbage to back a preview of eight lines. Trim once the tail has
+		// doubled instead; refreshRecentOutput() settles the window at the emit
+		// boundary, where line reconstruction already happens.
+		if (recentOutputTail.length > RECENT_OUTPUT_TAIL_BYTES * 2) {
 			recentOutputTail = recentOutputTail.slice(-RECENT_OUTPUT_TAIL_BYTES);
 		}
-		// O(chunk) hot path: this runs on every text_delta token (hundreds/
-		// thousands per second while streaming). Line reconstruction is deferred
-		// to refreshRecentOutput() at the emit boundary.
 		recentOutputDirty = true;
 	};
 
@@ -1439,7 +1451,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 			if (record.type !== "text" || typeof record.text !== "string") continue;
 			if (!record.text) continue;
 			recentOutputTail += record.text;
-			if (recentOutputTail.length > RECENT_OUTPUT_TAIL_BYTES) {
+			if (recentOutputTail.length > RECENT_OUTPUT_TAIL_BYTES * 2) {
 				recentOutputTail = recentOutputTail.slice(-RECENT_OUTPUT_TAIL_BYTES);
 			}
 		}

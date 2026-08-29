@@ -1032,31 +1032,40 @@ export class OutputSink {
 		if (dataBytes === 0) return;
 
 		const threshold = Math.max(0, this.#spillThreshold - this.#headBytes);
-		const willOverflow = this.#bufferBytes + dataBytes > threshold;
-
-		if (!willOverflow) {
-			this.#buffer += chunk;
-			this.#bufferBytes += dataBytes;
-			return;
-		}
-
-		// Overflow: keep only a tail window in memory.
-		this.#truncated = true;
 
 		// Avoid creating a giant intermediate string when chunk alone dominates.
 		if (dataBytes >= threshold) {
+			this.#truncated = true;
 			const { text, bytes } = truncateTailBytes(chunk, threshold);
 			this.#buffer = text;
 			this.#bufferBytes = bytes;
-		} else {
-			// Intermediate size is bounded (<= threshold + dataBytes), safe to concat.
-			this.#buffer += chunk;
-			this.#bufferBytes += dataBytes;
-
-			const { text, bytes } = truncateTailBytes(this.#buffer, threshold);
-			this.#buffer = text;
-			this.#bufferBytes = bytes;
+			return;
 		}
+
+		this.#buffer += chunk;
+		this.#bufferBytes += dataBytes;
+		if (this.#bufferBytes <= threshold) return;
+
+		// Overflow: bytes will be dropped from the front of the window.
+		this.#truncated = true;
+
+		// Re-materialising the window costs O(threshold): a substring, a full
+		// UTF-8 encode and a full decode. Paying that per chunk made a streaming
+		// tool burn ~4 × 50 KB of fresh string plus two transcodes for every
+		// ~8 KB the shell handed us — O(output × window) of allocation churn for
+		// a window that only ever needs to be correct when someone reads it.
+		// Let it overshoot to 2× the budget instead: the trim then happens once
+		// per threshold of output, so the amortised cost is O(1) per byte.
+		// Readers settle the window to the exact budget.
+		if (this.#bufferBytes > threshold * 2) this.#trimTailTo(threshold);
+	}
+
+	/** Settle the rolling tail at `threshold` bytes, cut on a UTF-8 boundary. */
+	#trimTailTo(threshold: number): void {
+		if (this.#bufferBytes <= threshold) return;
+		const { text, bytes } = truncateTailBytes(this.#buffer, threshold);
+		this.#buffer = text;
+		this.#bufferBytes = bytes;
 	}
 
 	/**
@@ -1317,6 +1326,9 @@ export class OutputSink {
 
 		// Compose the visible output. With head retention, splice head + marker
 		// + tail when content was elided. Otherwise return the rolling buffer.
+		// The push path lets the window overshoot to amortise re-materialisation,
+		// so settle it to the real budget before anything reads it.
+		this.#trimTailTo(Math.max(0, this.#spillThreshold - this.#headBytes));
 		const headBytes = this.#headBytes;
 		const tailBuf = this.#buffer;
 		const tailBytes = this.#bufferBytes;
