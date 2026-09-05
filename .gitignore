@@ -11,6 +11,8 @@ target/
 .xwin-cache/
 *.tsbuildinfo
 *.node
+# Windows rename-on-upgrade backups: the installer cannot overwrite a loaded DLL
+*.node.old-*
 *.b64.js
 /result
 /result-*
@@ -64,6 +66,7 @@ pi-*.html
 # Generated files
 packages/coding-agent/src/export/html/tool-views.generated.js
 packages/natives/npm/
+packages/natives/native/.installed-version
 /runs/
 python/omp-rpc/src/omp_rpc.egg-info/
 python/omp-rpc/build/
