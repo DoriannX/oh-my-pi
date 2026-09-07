@@ -1,0 +1,94 @@
+name: Fullscreen Windows release
+
+on:
+   schedule:
+      - cron: "17 * * * *"
+   workflow_dispatch:
+   push:
+      branches: [feat/fullscreen-chat-tui]
+
+permissions:
+   contents: write
+
+concurrency:
+   group: fullscreen-windows-release
+   cancel-in-progress: false
+
+env:
+   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+   release:
+      if: github.repository == 'DoriannX/oh-my-pi'
+      runs-on: windows-latest
+      timeout-minutes: 90
+      defaults:
+         run:
+            shell: pwsh
+      steps:
+         - uses: actions/checkout@v4
+           with:
+              ref: feat/fullscreen-chat-tui
+              fetch-depth: 0
+
+         - name: Merge latest stable upstream without publishing
+           id: source
+           env:
+              GH_TOKEN: ${{ github.token }}
+           run: ./scripts/fullscreen-release.ps1 -Phase Prepare
+
+         - uses: oven-sh/setup-bun@v2
+           if: steps.source.outputs.skip != 'true'
+           with:
+              bun-version: ${{ steps.source.outputs.bun-version }}
+
+         - name: Install locked dependencies
+           if: steps.source.outputs.skip != 'true'
+           run: |
+              bun install --frozen-lockfile
+              if ($LASTEXITCODE -ne 0) { throw "Locked dependency installation failed" }
+
+         - name: Install exact published Windows native addon
+           if: steps.source.outputs.skip != 'true'
+           run: ./scripts/fullscreen-release.ps1 -Phase Native
+
+         - name: Typecheck TUI and coding agent
+           if: steps.source.outputs.skip != 'true'
+           run: |
+              bun --cwd=packages/tui run check:types
+              if ($LASTEXITCODE -ne 0) { throw "TUI typecheck failed" }
+              bun --cwd=packages/coding-agent run check:types
+              if ($LASTEXITCODE -ne 0) { throw "Coding-agent typecheck failed" }
+
+         - name: Verify fullscreen behavior
+           if: steps.source.outputs.skip != 'true'
+           working-directory: packages/coding-agent
+           run: |
+              bun test test/modes/components/fullscreen-chat-view.test.ts test/cli-tui-mode-flag.test.ts test/interactive-mode-fullscreen-stop.test.ts
+              if ($LASTEXITCODE -ne 0) { throw "Fullscreen regression suites failed" }
+
+         - name: Verify alternate screen and dock regressions
+           if: steps.source.outputs.skip != 'true'
+           working-directory: packages/tui
+           run: |
+              bun test test/overlay-focus.test.ts test/start-listener.test.ts test/alt-frame-caret-only.test.ts test/cursor-visibility-dedupe.test.ts test/emergency-restore-altscreen.test.ts
+              if ($LASTEXITCODE -ne 0) { throw "Alternate-screen regression suites failed" }
+              bun test test/editor.test.ts --test-name-pattern "renders rule style as a top-rule dock"
+              if ($LASTEXITCODE -ne 0) { throw "Editor dock regression failed" }
+
+         - name: Build standalone Windows x64 binary
+           if: steps.source.outputs.skip != 'true'
+           working-directory: packages/coding-agent
+           run: |
+              bun run build
+              if ($LASTEXITCODE -ne 0) { throw "Standalone binary build failed" }
+
+         - name: Smoke real binary and checksum release assets
+           if: steps.source.outputs.skip != 'true'
+           run: ./scripts/fullscreen-release.ps1 -Phase Smoke
+
+         - name: Push verified source and publish complete release
+           if: steps.source.outputs.skip != 'true'
+           env:
+              GH_TOKEN: ${{ github.token }}
+           run: ./scripts/fullscreen-release.ps1 -Phase Publish
