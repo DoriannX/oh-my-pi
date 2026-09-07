@@ -77,7 +77,7 @@ function Receive-GitHubFile {
                 $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
                 try {
                     $outputStream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-                    try { $inputStream.CopyToAsync($outputStream, 81920, $deadline.Token).GetAwaiter().GetResult() }
+                    try { $null = $inputStream.CopyToAsync($outputStream, 81920, $deadline.Token).GetAwaiter().GetResult() }
                     finally { $outputStream.Dispose() }
                 } finally { $inputStream.Dispose() }
                 return
