@@ -48,6 +48,21 @@ function Get-GitHub {
     }
 }
 
+function Get-Release {
+    param([string]$Tag)
+    $published = Get-GitHub "repos/$Repository/releases/tags/$Tag" -AllowNotFound
+    if ($published) { return $published }
+    # GitHub's by-tag endpoint excludes drafts, including drafts owned by this token.
+    # The authenticated release list includes them and permits interrupted uploads to resume.
+    for ($page = 1; ; $page++) {
+        $releases = @(Get-GitHub "repos/$Repository/releases?per_page=100&page=$page")
+        $matching = @($releases | Where-Object { $_.tag_name -ceq $Tag })
+        if ($matching.Count -gt 1) { throw "Multiple releases use tag $Tag." }
+        if ($matching.Count -eq 1) { return $matching[0] }
+        if ($releases.Count -lt 100) { return $null }
+    }
+}
+
 function Get-RemoteCommit {
     param([string]$Ref)
     $rows = @(Invoke-Checked git @('ls-remote', 'origin', $Ref, "$Ref^{}"))
@@ -113,7 +128,7 @@ if ($Phase -eq 'Prepare') {
     }
     $state | ConvertTo-Json | Set-Content -LiteralPath $StatePath -Encoding utf8NoBOM
 
-    $release = Get-GitHub "repos/$Repository/releases/tags/$tag" -AllowNotFound
+    $release = Get-Release $tag
     $tagCommit = Get-RemoteCommit "refs/tags/$tag"
     if ($tagCommit -and $tagCommit -cne $commit) { throw "Immutable tag $tag already points to a different commit." }
     if ($release -and -not $release.draft) {
@@ -258,7 +273,7 @@ if ((Get-RemoteCommit "refs/heads/$Branch") -cne $state.commit) {
     throw 'Remote branch advanced before publication; leaving the existing public latest unchanged.'
 }
 
-$release = Get-GitHub "repos/$Repository/releases/tags/$($state.tag)" -AllowNotFound
+$release = Get-Release $state.tag
 if ($release -and -not $release.draft) {
     Assert-ReleaseAssets $release
     Write-Host "Release $($state.tag) is already public; leaving it immutable."
@@ -271,7 +286,7 @@ if (-not $release) {
 # Reuse our same-tag draft after an interrupted upload; never alter a public release.
 $assetPaths = @($AssetNames | ForEach-Object { Join-Path $AssetsDir $_ })
 Invoke-Checked gh (@('release', 'upload', $state.tag, '--repo', $Repository, '--clobber') + $assetPaths)
-$release = Get-GitHub "repos/$Repository/releases/tags/$($state.tag)"
+$release = Get-Release $state.tag
 if (-not $release.draft) { throw 'Release unexpectedly became public during asset upload.' }
 Assert-ReleaseAssets $release
 $downloadDir = Join-Path $env:RUNNER_TEMP "fullscreen-release-download-$([guid]::NewGuid().ToString('N'))"
