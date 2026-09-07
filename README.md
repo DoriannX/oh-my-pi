@@ -32,6 +32,63 @@ The most capable agent surface that ships. Continuously tuned by real-world use 
 > while we evaluate how open contributions go. Depending on the results, the
 > vouch system may return.
 
+## Windows fullscreen fork
+
+This fork publishes standalone **Windows x64 fullscreen** builds on
+[GitHub Releases](https://github.com/DoriannX/oh-my-pi/releases/latest).
+The default branch is `feat/fullscreen-chat-tui`; the installation instructions
+below this section refer to upstream OMP, not this fullscreen build.
+
+Install from PowerShell 5.1 or newer:
+
+```powershell
+$installer = Join-Path $env:TEMP 'omp-fs-sync.ps1'
+Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/DoriannX/oh-my-pi/releases/latest/download/omp-fs-sync.ps1' -OutFile $installer
+Unblock-File -LiteralPath $installer
+& $installer -InstallShell
+. $PROFILE
+```
+
+Then use:
+
+```powershell
+omp-fs       # Launch fullscreen OMP
+omp-sync     # Download and install the latest verified fullscreen release
+```
+
+The updater requires no local Bun, Rust, Git, or source checkout. It installs
+`~/.bun/bin/omp-fs.exe` and `~/.omp/bin/omp-sync.ps1`, leaving the official `omp`
+command unchanged. Both downloaded assets are checked against the release's
+`SHA256SUMS`; the executable must load its native addon before and after
+replacement. Failed installation restores the previous executable when present.
+Successful replacement retains a uniquely named `.parked-*` executable for
+manual rollback. Running OMP sessions keep their current executable; start a new
+session to use the update.
+
+`-InstallShell` adds or replaces only the marked `omp-fullscreen` block in the
+current PowerShell host's `$PROFILE`. Without it, `omp-sync` leaves the profile
+unchanged. `-Destination` can select another executable path; pass the same
+destination on later updates. The old rebuild options `--target`, `--no-test`,
+and `--force` are no longer used.
+
+The [fullscreen release workflow](https://github.com/DoriannX/oh-my-pi/actions/workflows/fullscreen-release.yml)
+checks upstream stable releases hourly, at minute 17 (GitHub may delay scheduled
+runs), and also runs on pushes to the fullscreen branch or manual dispatch.
+It merges upstream source while retaining this fork's workflow definitions,
+uses the exact published native addon and pinned Bun version, then runs
+typechecks, fullscreen regressions, a build, and real-binary smoke checks.
+Conflicts, unavailable native packages, or failed checks stop publication;
+the previous public release remains available. No new release is created when
+the current source commit is already published. The inherited upstream CI
+workflows are disabled on this fork; only the fullscreen release workflow runs.
+
+Release tags include both the upstream version and fork commit. Each release
+contains the executable, updater, checksums, and GitHub's source archives.
+Clone this repository separately if you also want a working source checkout;
+`omp-sync` updates the installed binary, not a local Git branch. Authenticate
+OMP separately on each computer; credentials and personal configuration are
+not distributed in releases.
+
 ## Install
 
 **macOS · Linux**

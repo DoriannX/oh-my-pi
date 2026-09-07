@@ -35,11 +35,12 @@ function Get-GitHub {
     param([string]$Path, [switch]$AllowNotFound)
     if (-not $env:GH_TOKEN) { throw 'GH_TOKEN is required for GitHub API access.' }
     try {
-        Invoke-RestMethod -Uri "https://api.github.com/$Path" -Headers @{
+        $response = Invoke-RestMethod -Uri "https://api.github.com/$Path" -Headers @{
             Authorization = "Bearer $env:GH_TOKEN"
             Accept = 'application/vnd.github+json'
             'X-GitHub-Api-Version' = '2022-11-28'
         }
+        return $response
     } catch {
         if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404 -and $AllowNotFound) {
             return $null

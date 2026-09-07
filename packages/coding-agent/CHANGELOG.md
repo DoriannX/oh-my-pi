@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- This fullscreen fork publishes verified Windows x64 GitHub releases from upstream stable updates; `omp-sync` downloads releases instead of rebuilding locally.
+
 ## [18.1.12] - 2026-09-06
 
 - Fixed edit and write results to report the formatted bytes actually committed by LSP writethrough.
