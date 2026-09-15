@@ -39,8 +39,6 @@ jobs:
 
          - uses: oven-sh/setup-bun@v2
            if: steps.source.outputs.skip != 'true'
-           with:
-              bun-version: ${{ steps.source.outputs.bun-version }}
 
          - name: Install locked dependencies
            if: steps.source.outputs.skip != 'true'

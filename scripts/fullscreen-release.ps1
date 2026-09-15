@@ -115,17 +115,16 @@ if ($Phase -eq 'Prepare') {
     $version = $upstreamTag -creplace '^v', ''
     $tag = "fullscreen-v$version-$shortCommit"
     $packageManager = [string](Get-Content (Join-Path $Root 'package.json') -Raw | ConvertFrom-Json).packageManager
-    if ($packageManager -cnotmatch '^bun@(\d+\.\d+\.\d+)(?:\+sha(?:256|512)\.[a-fA-F0-9]+)?$') {
-        throw "Merged package.json must pin a stable Bun version, got: $packageManager"
+    if ($packageManager -cnotmatch '^bun@(?:\d+\.\d+\.\d+(?:\+sha(?:256|512)\.[a-fA-F0-9]+)?|>=\d+\.\d+(?:\.\d+)?)$') {
+        throw "Merged package.json must declare an exact Bun version or a stable minimum, got: $packageManager"
     }
-    $bunVersion = $Matches[1]
+    $bunVersionConstraint = $packageManager.Substring(4)
     $state = [ordered]@{
         baseCommit = $baseCommit
         commit = $commit
         upstreamTag = $upstreamTag
         upstreamCommit = $upstreamCommit
         tag = $tag
-        bunVersion = $bunVersion
     }
     $state | ConvertTo-Json | Set-Content -LiteralPath $StatePath -Encoding utf8NoBOM
 
@@ -139,8 +138,8 @@ if ($Phase -eq 'Prepare') {
         'skip=true' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8NoBOM
         return
     }
-    @('skip=false', "bun-version=$bunVersion") | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8NoBOM
-    Write-Host "Building $tag from upstream $upstreamTag with Bun $bunVersion."
+    'skip=false' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8NoBOM
+    Write-Host "Building $tag from upstream $upstreamTag with Bun $bunVersionConstraint."
     return
 }
 
