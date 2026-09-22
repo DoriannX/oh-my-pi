@@ -5826,7 +5826,12 @@ export class InteractiveMode implements InteractiveModeContext {
 	setFullscreenTui(enabled: boolean): void {
 		if (enabled) {
 			if (this.#fullscreenChatOverlay) return;
-			const rootChildren = this.#rootRuntimeChildren;
+			// Composer appends its status host after the runtime children. Prefer
+			// the mounted list so fullscreen keeps that host in the fixed dock.
+			const mounted = this.ui.children;
+			const rootChildren = mounted.includes(this.pendingMessagesContainer)
+				? mounted
+				: [...this.#rootRuntimeChildren, this.statusLine];
 			const dockStart = rootChildren.indexOf(this.pendingMessagesContainer);
 			if (dockStart === -1) return;
 			this.#fullscreenChatView = new FullscreenChatView(

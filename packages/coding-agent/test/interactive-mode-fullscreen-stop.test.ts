@@ -88,4 +88,14 @@ describe("InteractiveMode fullscreen teardown", () => {
 		mode.setFullscreenTui(false);
 		expect(mode.editor.getUseTerminalCursor()).toBe(true);
 	});
+
+	it("keeps the composer status host in the fullscreen dock", async () => {
+		vi.spyOn(mode.statusLine, "render").mockReturnValue(["status-sentinel"]);
+
+		mode.setFullscreenTui(true);
+		mode.ui.requestRender(true);
+		await terminal.waitForRender(() => terminal.getViewport().some(line => line.includes("status-sentinel")));
+
+		expect(terminal.getViewport().some(line => line.includes("status-sentinel"))).toBe(true);
+	});
 });
