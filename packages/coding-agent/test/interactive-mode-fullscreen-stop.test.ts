@@ -4,11 +4,11 @@ import { Agent } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InteractiveMode } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TUI } from "@oh-my-pi/pi-tui";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal";
 
@@ -47,6 +47,7 @@ describe("InteractiveMode fullscreen teardown", () => {
 
 	afterEach(async () => {
 		mode?.stop();
+		await terminal?.waitForRender();
 		vi.restoreAllMocks();
 		await session?.dispose();
 		authStorage?.close();
@@ -73,5 +74,18 @@ describe("InteractiveMode fullscreen teardown", () => {
 
 		expect(writes.join("")).not.toContain("\x1b[?1049h");
 		mode.ui.stop();
+	});
+
+	it("keeps the software cursor active while fullscreen owns focus", () => {
+		expect(mode.editor.getUseTerminalCursor()).toBe(true);
+
+		mode.setFullscreenTui(true);
+		expect(mode.editor.getUseTerminalCursor()).toBe(false);
+
+		mode.ui.setFocus(mode.editor);
+		expect(mode.editor.getUseTerminalCursor()).toBe(false);
+
+		mode.setFullscreenTui(false);
+		expect(mode.editor.getUseTerminalCursor()).toBe(true);
 	});
 });
