@@ -19,6 +19,7 @@ target/
 
 # Environment
 .env
+.venv
 
 # Editors
 .vscode/
